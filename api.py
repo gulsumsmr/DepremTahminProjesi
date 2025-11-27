@@ -14,19 +14,16 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 app = Flask(__name__)
 CORS(app)
 
-# --- 1. MODELİ YÜKLE ---
 model_path = 'deprem_modeli.h5'
 try:
-    # Yeni LSTM modelini yüklüyoruz
     model = load_model(model_path, compile=False)
-    print("✅ LSTM Modeli başarıyla yüklendi ve hazır.")
+    print("LSTM Modeli başarıyla yüklendi ve hazır.")
 except Exception as e:
-    print(f"❌ Model yüklenirken hata oluştu: {e}")
+    print(f"Model yüklenirken hata oluştu: {e}")
     model = None
 
-# --- 2. CANLI VERİ ÇEKME FONKSİYONU (Değişiklik yok) ---
 def gelismis_canli_veri_getir(max_veri_sayisi=2000, gun_araligi=30):
-    print(f"\n📡 AFAD'dan son {gun_araligi} gün için en fazla {max_veri_sayisi} deprem verisi çekiliyor...")
+    print(f"\n AFAD'dan son {gun_araligi} gün için en fazla {max_veri_sayisi} deprem verisi çekiliyor...")
     tum_veriler = []
     limit_her_istek = 500
     offset = 0
@@ -51,17 +48,16 @@ def gelismis_canli_veri_getir(max_veri_sayisi=2000, gun_araligi=30):
     df = pd.DataFrame(tum_veriler)
     rename_map = {'magnitude': 'Buyukluk', 'depth': 'Derinlik', 'latitude': 'Enlem', 'longitude': 'Boylam', 'location': 'Yer', 'date': 'Tarih'}
     df.rename(columns=rename_map, inplace=True)
-    print(f"✅ BAŞARILI! Toplam {len(df)} adet canlı deprem verisi çekildi.")
+    print(f"BAŞARILI! Toplam {len(df)} adet canlı deprem verisi çekildi.")
     return df
 
 # Yedek veri kümesi
 try:
-    # LSTM için artık bu CSV'ye doğrudan ihtiyacımız yok ama yedek olarak kalabilir.
     df_yedek = pd.read_csv('egitim_kumesi.csv') 
-    print("✅ Yedek veri kümesi (egitim_kumesi.csv) başarıyla yüklendi.")
+    print("Yedek veri kümesi (egitim_kumesi.csv) başarıyla yüklendi.")
 except:
     df_yedek = pd.DataFrame()
-    print("⚠️ Yedek veri kümesi bulunamadı.")
+    print("Yedek veri kümesi bulunamadı.")
 
 @app.route('/tahmin-et', methods=['POST'])
 def tahmin_et():
@@ -73,10 +69,7 @@ def tahmin_et():
         secilen_enlem = float(data['enlem'])
         secilen_boylam = float(data['boylam'])
 
-        # Canlı veriyi çek (Eskiden yeniye sıralı)
-        df_referans = gelismis_canli_veri_getir(max_veri_sayisi=2000, gun_araligi=60) # Daha geniş bir aralık çekelim
-        
-        # AFAD verisi normalde yeniden eskiye gelir, biz eskiden yeniye çevirelim
+        df_referans = gelismis_canli_veri_getir(max_veri_sayisi=2000, gun_araligi=60) 
         df_referans = df_referans.iloc[::-1].reset_index(drop=True)
 
         kaynak_tipi = "YOK"
@@ -89,41 +82,29 @@ def tahmin_et():
         for col in cols:
             df_referans[col] = pd.to_numeric(df_referans[col], errors='coerce')
         df_referans.dropna(subset=cols, inplace=True)
-
-        # --- YENİ MANTIK: LSTM İÇİN GİRDİ PENCERESİ OLUŞTURMA ---
         
-        # 1. Seçilen konuma en yakın depremin index'ini bul
         mesafeler = np.sqrt((df_referans['Enlem'] - secilen_enlem)**2 + (df_referans['Boylam'] - secilen_boylam)**2)
         en_yakin_index = mesafeler.idxmin()
 
-        # 2. Bu index'in, bir pencere oluşturmak için yeterli geçmişe sahip olduğundan emin ol
         window_size = 10
         if en_yakin_index < window_size -1:
-            # Eğer en yakın deprem, veri setinin çok başındaysa (örn. 5. sıradaysa), 10'luk geçmişi olmaz.
-            # Bu durumda, veri setinin en başındaki ilk 10 depremi kullanırız.
             start_index = 0
             print(f"Uyarı: En yakın depremin yeterli geçmişi yok. Veri setinin başından {window_size} veri kullanılıyor.")
         else:
-            # En yakın depremi ve ondan önceki 9 depremi alacak şekilde başlangıç index'ini hesapla
             start_index = en_yakin_index - window_size + 1
         
         end_index = start_index + window_size
         
-        # 3. 10'luk pencereyi oluştur
         pencere_df = df_referans.iloc[start_index:end_index]
         giris_verisi_penceresi = pencere_df[['Enlem', 'Boylam', 'Derinlik', 'Buyukluk']].values
         
-        # 4. Modelin beklediği şekle getir: (1, 10, 4)
-        # Başına 1 eklemek, "1 adet pencere gönderiyorum" demektir.
         giris_verisi = np.expand_dims(giris_verisi_penceresi, axis=0)
         
         print(f"Modele gönderilen veri şekli: {giris_verisi.shape}") # Konsolda (1, 10, 4) görmelisin
 
-        # MODELE GÖRE TAHMİN YAPMA
         tahmin_sonucu = model.predict(giris_verisi)
         tahmin_buyukluk = float(tahmin_sonucu[0][0])
 
-        # Arayüzde göstermek için en son (en yakın) depremin bilgilerini al
         en_yakin_deprem = df_referans.loc[en_yakin_index]
         girdi_buyukluk = float(en_yakin_deprem['Buyukluk'])
         girdi_derinlik = float(en_yakin_deprem['Derinlik'])
@@ -142,7 +123,6 @@ def tahmin_et():
 
     except Exception as e:
         print(f"❌ Sunucu tarafında bir hata oluştu: {e}")
-        # Detaylı hata mesajını React tarafına göndermek için
         import traceback
         hata_detay = traceback.format_exc()
         print(hata_detay)
