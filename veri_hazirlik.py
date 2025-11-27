@@ -1,0 +1,74 @@
+# veri_hazirlik.py (Strateji 2: LSTM için Hazırlık)
+
+import pandas as pd
+import numpy as np
+import os
+
+# --- 1. VERİYİ YÜKLE VE TEMİZLE ---
+dosya_adi = 'data.csv'
+print(f"'{dosya_adi}' dosyası okunuyor...")
+if not os.path.exists(dosya_adi):
+    print(f"HATA: '{dosya_adi}' bulunamadı."); exit()
+
+try:
+    df = pd.read_csv(dosya_adi, sep=',')
+    if len(df.columns) < 2: df = pd.read_csv(dosya_adi, sep=';')
+    df.columns = df.columns.str.strip()
+except Exception as e:
+    print(f"Dosya okuma hatası: {e}"); exit()
+
+rename_dict = {'Latitude': 'Enlem', 'Longitude': 'Boylam', 'Depth': 'Derinlik', 'Magnitude': 'Buyukluk'}
+df.rename(columns=rename_dict, inplace=True)
+df = df[['Enlem', 'Boylam', 'Derinlik', 'Buyukluk']]
+
+orjinal_sayi = len(df)
+min_buyukluk = 2.0
+df = df[df['Buyukluk'] >= min_buyukluk]
+print(f"Veri Temizlendi: {min_buyukluk}'den küçük {orjinal_sayi - len(df)} deprem çıkarıldı.")
+
+df = df.iloc[::-1].reset_index(drop=True)
+
+# --- 2. VERİYİ LSTM FORMATINA DÖNÜŞTÜRME ---
+print("\nVeri, LSTM için 'pencereler' halinde hazırlanıyor...")
+
+# Her bir pencerede kaç geçmiş depreme bakılacak?
+window_size = 10  # Son 10 depreme bakarak bir sonrakini tahmin et. Bu değeri değiştirebilirsin.
+
+# Girdiler (X) ve Çıktılar (y) için boş listeler
+X_data, y_data = [], []
+
+# Veri çerçevesi üzerinde gezinerek pencereleri oluştur
+for i in range(len(df) - window_size):
+    # Girdi: i'den (i + window_size)'a kadar olan 10 depremin tüm özellikleri
+    window = df.iloc[i : i + window_size][['Enlem', 'Boylam', 'Derinlik', 'Buyukluk']].values
+    X_data.append(window)
+    
+    # Çıktı: Bu pencereden hemen sonraki depremin büyüklüğü
+    target = df.iloc[i + window_size]['Buyukluk']
+    y_data.append(target)
+
+# Listeleri NumPy dizilerine çevir
+X = np.array(X_data)
+y = np.array(y_data)
+
+# Verinin şeklini kontrol et: (Örnek Sayısı, Pencere Boyutu, Özellik Sayısı)
+print(f"Hazırlanan veri şekli: {X.shape}") # Örn: (45000, 10, 4)
+
+# --- 3. EĞİTİM VE TEST VERİSİ OLARAK AYIRMA VE KAYDETME ---
+split_ratio = 0.8
+split_index = int(len(X) * split_ratio)
+
+X_train, X_test = X[:split_index], X[split_index:]
+y_train, y_test = y[:split_index], y[split_index:]
+
+print(f"Eğitim verisi: {len(X_train)} pencere")
+print(f"Test verisi: {len(X_test)} pencere")
+
+# NumPy'nin kendi formatında kaydetmek daha verimli ve hızlıdır.
+np.save('X_train.npy', X_train)
+np.save('y_train.npy', y_train)
+np.save('X_test.npy', X_test)
+np.save('y_test.npy', y_test)
+
+print("\n--- İŞLEM TAMAM ---")
+print("LSTM için hazırlanan veriler 'X_train.npy', 'y_train.npy' vb. olarak kaydedildi.")
